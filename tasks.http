@@ -9,10 +9,33 @@ GET {{baseUrl}}/hello/Kenneth
 ### Loud greeting
 GET {{baseUrl}}/hello/Kenneth?loud=true
 
+### Register a user
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "username": "postman-user",
+  "email": "postman@example.com",
+  "password": "test-password-123"
+}
+
+### Log in
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "postman@example.com",
+  "password": "test-password-123"
+}
+
+@accessToken = {{login.response.body.$.accessToken}}
+
 ### Create a task
 # @name createTask
 POST {{baseUrl}}/tasks
 Content-Type: application/json
+Authorization: Bearer {{accessToken}}
 
 {
   "title": "Test task",
@@ -21,14 +44,17 @@ Content-Type: application/json
 
 ### Get all tasks
 GET {{baseUrl}}/tasks
+Authorization: Bearer {{accessToken}}
 
 ### Get the task created above
 @taskId = {{createTask.response.body.$.id}}
 GET {{baseUrl}}/tasks/{{taskId}}
+Authorization: Bearer {{accessToken}}
 
 ### Update the task
 PATCH {{baseUrl}}/tasks/{{taskId}}
 Content-Type: application/json
+Authorization: Bearer {{accessToken}}
 
 {
   "completed": true
@@ -36,3 +62,4 @@ Content-Type: application/json
 
 ### Delete the task
 DELETE {{baseUrl}}/tasks/{{taskId}}
+Authorization: Bearer {{accessToken}}

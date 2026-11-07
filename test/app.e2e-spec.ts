@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
@@ -57,6 +57,7 @@ describe('AppController (e2e)', () => {
       title: 'Test task',
       description: 'Task details',
       completed: false,
+      ownerId: 1,
     });
 
     await request(server)
@@ -117,7 +118,99 @@ describe('AppController (e2e)', () => {
       .get('/tasks')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200)
-      .expect([{ id: 1, title: 'Persistent task', completed: false }]);
+      .expect([
+        {
+          id: 1,
+          title: 'Persistent task',
+          completed: false,
+          ownerId: 1,
+        },
+      ]);
+  });
+
+  it('only allows users to access their own tasks', async () => {
+    const server = app.getHttpServer();
+    await request(server)
+      .post('/tasks')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ title: 'Private task' })
+      .expect(201);
+
+    const secondUser = await request(server)
+      .post('/auth/register')
+      .send({
+        username: 'second-user',
+        email: 'second@example.com',
+        password: 'secure-password',
+      })
+      .expect(201);
+
+    await request(server)
+      .get('/tasks')
+      .set('Authorization', `Bearer ${secondUser.body.accessToken}`)
+      .expect(200)
+      .expect([]);
+    await request(server)
+      .get('/tasks/1')
+      .set('Authorization', `Bearer ${secondUser.body.accessToken}`)
+      .expect(404);
+    await request(server)
+      .patch('/tasks/1')
+      .set('Authorization', `Bearer ${secondUser.body.accessToken}`)
+      .send({ title: 'Hijacked task' })
+      .expect(404);
+    await request(server)
+      .delete('/tasks/1')
+      .set('Authorization', `Bearer ${secondUser.body.accessToken}`)
+      .expect(404);
+
+    await request(server)
+      .get('/tasks/1')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200)
+      .expect({
+        id: 1,
+        title: 'Private task',
+        completed: false,
+        ownerId: 1,
+      });
+  });
+
+  it('keeps pre-authentication tasks inaccessible to users', async () => {
+    await app.close();
+    await writeFile(
+      join(databaseDirectory, 'tasks.json'),
+      JSON.stringify({
+        tasks: [{ id: 1, title: 'Legacy task', completed: false }],
+        nextId: 2,
+      }),
+    );
+
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
+    await app.init();
+
+    const registration = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        username: 'new-user',
+        email: 'new@example.com',
+        password: 'secure-password',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .get('/tasks')
+      .set('Authorization', `Bearer ${registration.body.accessToken}`)
+      .expect(200)
+      .expect([]);
+    await request(app.getHttpServer())
+      .get('/tasks/1')
+      .set('Authorization', `Bearer ${registration.body.accessToken}`)
+      .expect(404);
   });
 
   it('validates task input and task IDs', async () => {

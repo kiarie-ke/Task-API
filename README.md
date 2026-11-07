@@ -64,7 +64,8 @@ with `POST /auth/register` and log in with `POST /auth/login`; both accept a
 JSON body containing `email` and `password`, and registration also requires a
 `username`. Successful requests return an `accessToken` and a user profile.
 Include the token as `Authorization: Bearer <accessToken>` when calling any
-`/tasks` endpoint.
+`/tasks` endpoint. Tasks are private to the account that created them. Tasks
+saved before authentication was added remain unowned and inaccessible.
 
 ## Deployment
 

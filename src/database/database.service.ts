@@ -13,6 +13,7 @@ export interface Task {
     title: string;
     description?: string;
     completed: boolean;
+    ownerId?: number;
 }
 
 interface DatabaseShape {
@@ -39,7 +40,11 @@ function isTask(value: unknown): value is Task {
         typeof value.title === 'string' &&
         (value.description === undefined ||
             typeof value.description === 'string') &&
-        typeof value.completed === 'boolean'
+        typeof value.completed === 'boolean' &&
+        (value.ownerId === undefined ||
+            (typeof value.ownerId === 'number' &&
+                Number.isSafeInteger(value.ownerId) &&
+                value.ownerId > 0))
     );
 }
 
@@ -157,15 +162,21 @@ export class DatabaseService implements OnModuleInit {
         };
     }
 
-    findAll(): Promise<Task[]> {
+    findAll(ownerId: number): Promise<Task[]> {
         return this.enqueue(() =>
-            Promise.resolve(this.database.tasks.map((task) => ({ ...task }))),
+            Promise.resolve(
+                this.database.tasks
+                    .filter((task) => task.ownerId === ownerId)
+                    .map((task) => ({ ...task })),
+            ),
         );
     }
 
-    findOne(id: number): Promise<Task | undefined> {
+    findOne(id: number, ownerId: number): Promise<Task | undefined> {
         return this.enqueue(() => {
-            const task = this.database.tasks.find((item) => item.id === id);
+            const task = this.database.tasks.find(
+                (item) => item.id === id && item.ownerId === ownerId,
+            );
             return Promise.resolve(task ? { ...task } : undefined);
         });
     }
@@ -215,7 +226,7 @@ export class DatabaseService implements OnModuleInit {
         });
     }
 
-    create(task: Omit<Task, 'id'>): Promise<Task> {
+    create(task: Omit<Task, 'id' | 'ownerId'> & { ownerId: number }): Promise<Task> {
         return this.enqueue(async () => {
             const createdTask: Task = {
                 id: this.database.nextId,
@@ -236,11 +247,12 @@ export class DatabaseService implements OnModuleInit {
 
     update(
         id: number,
+        ownerId: number,
         changes: Partial<Omit<Task, 'id'>>,
     ): Promise<Task | undefined> {
         return this.enqueue(async () => {
             const taskIndex = this.database.tasks.findIndex(
-                (task) => task.id === id,
+                (task) => task.id === id && task.ownerId === ownerId,
             );
             if (taskIndex === -1) {
                 return undefined;
@@ -260,10 +272,10 @@ export class DatabaseService implements OnModuleInit {
         });
     }
 
-    remove(id: number): Promise<Task | undefined> {
+    remove(id: number, ownerId: number): Promise<Task | undefined> {
         return this.enqueue(async () => {
             const taskIndex = this.database.tasks.findIndex(
-                (task) => task.id === id,
+                (task) => task.id === id && task.ownerId === ownerId,
             );
             if (taskIndex === -1) {
                 return undefined;
