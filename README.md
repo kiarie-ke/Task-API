@@ -67,6 +67,54 @@ Include the token as `Authorization: Bearer <accessToken>` when calling any
 `/tasks` endpoint. Tasks are private to the account that created them. Tasks
 saved before authentication was added remain unowned and inaccessible.
 
+## Frontend
+
+The Next.js task dashboard lives in [frontend/](./frontend/README.md). Run the
+API and frontend in separate terminals; the frontend runs at
+`http://localhost:3001` and connects to the API at `http://localhost:3000` by
+default.
+
+## Database
+
+The API stores users, tasks, and subtasks in SQLite at
+`data/taskflow.sqlite` by default. On its first start, it imports the existing
+`data/tasks.json` file if present; the JSON file is kept unchanged as a backup.
+The import preserves existing IDs, account ownership, and passwords. To use a
+different SQLite file, set `TASK_DATABASE_PATH`. To import from a different
+legacy JSON file, also set `TASK_LEGACY_DATABASE_PATH`.
+
+The SQLite schema is managed by TypeORM migrations, which run automatically at
+startup.
+
+## Task management
+
+Tasks support descriptions, due dates, low/medium/high priorities, free-text
+projects, and up to 10 labels. Recurring tasks can repeat daily, weekly, or
+monthly; a due date is required, and completing a recurring task creates its
+next occurrence. Tasks can also contain subtasks, which have their own
+completion state.
+
+The dashboard supports editing, status and due-date filters, priority/project/
+label filters, and sorting by creation time, due date, priority, or title.
+Due-today and overdue tasks are highlighted in the app; reminders are
+in-app only (there are no push or email notifications).
+
+The authenticated API accepts these optional task fields in `POST /tasks` and
+`PATCH /tasks/:id`:
+
+| Field | Values |
+| --- | --- |
+| `dueDate` | Date in `YYYY-MM-DD` format |
+| `priority` | `low`, `medium`, or `high` |
+| `project` | Free-text project name |
+| `labels` | Array of up to 10 strings |
+| `recurrence` | `daily`, `weekly`, or `monthly` |
+
+Subtasks are managed through `POST /tasks/:id/subtasks`,
+`PATCH /tasks/:id/subtasks/:subtaskId`, and
+`DELETE /tasks/:id/subtasks/:subtaskId`. All task and subtask operations are
+scoped to the authenticated owner.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
