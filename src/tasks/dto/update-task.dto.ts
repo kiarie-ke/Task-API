@@ -3,12 +3,14 @@ import {
     IsArray,
     IsBoolean,
     IsDateString,
+    IsInt,
     IsIn,
     IsNotEmpty,
     IsOptional,
     IsString,
     Matches,
     MaxLength,
+    IsPositive,
     ValidateIf,
 } from 'class-validator';
 import type { TaskPriority, TaskRecurrence } from '../../database/database.service';
@@ -54,4 +56,9 @@ export class UpdateTaskDto {
     @IsIn(['daily', 'weekly', 'monthly'])
     @IsOptional()
     recurrence?: TaskRecurrence | null;
+
+    @IsInt()
+    @IsPositive()
+    @IsOptional()
+    assigneeId?: number | null;
 }

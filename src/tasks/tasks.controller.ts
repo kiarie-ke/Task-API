@@ -2,12 +2,14 @@ import {
     Body,
     Controller,
     Delete,
+    BadRequestException,
     Get,
     Param,
     ParseIntPipe,
     Patch,
     Post,
     Req,
+    Query,
     UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -72,8 +74,21 @@ export class TasksController {
     }
 
     @Get()
-    findAll(@Req() request: AuthenticatedRequest) {
-        return this.tasksService.findAll(request.user.id);
+    findAll(
+        @Req() request: AuthenticatedRequest,
+        @Query('workspaceId') workspaceId?: string,
+    ) {
+        if (workspaceId === undefined) {
+            return this.tasksService.findAll(request.user.id);
+        }
+        const parsedWorkspaceId = Number(workspaceId);
+        if (!Number.isSafeInteger(parsedWorkspaceId) || parsedWorkspaceId < 1) {
+            throw new BadRequestException('workspaceId must be a positive integer');
+        }
+        return this.tasksService.findAll(
+            request.user.id,
+            parsedWorkspaceId,
+        );
     }
 
     @Get(':id')

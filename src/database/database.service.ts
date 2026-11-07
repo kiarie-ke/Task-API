@@ -5,6 +5,7 @@ import {
     DataSource,
     QueryFailedError,
     Repository,
+    IsNull,
     type EntityManager,
 } from 'typeorm';
 import { TaskEntity } from './entities/task.entity';
@@ -17,6 +18,7 @@ export interface User {
     username: string;
     email: string;
     password: string;
+    tokenVersion?: number;
 }
 
 export type TaskPriority = 'low' | 'medium' | 'high';
@@ -34,6 +36,8 @@ export interface Task {
     description?: string;
     completed: boolean;
     ownerId?: number;
+    workspaceId?: number;
+    assigneeId?: number;
     dueDate?: string;
     priority?: TaskPriority;
     project?: string;
@@ -236,8 +240,16 @@ function isUniqueEmailError(error: unknown): boolean {
     }
 
     const driverError: unknown = error.driverError;
+    if (!isRecord(driverError)) {
+        return false;
+    }
+    if (
+        driverError.code === '23505' &&
+        driverError.constraint === 'IDX_users_email'
+    ) {
+        return true;
+    }
     return (
-        isRecord(driverError) &&
         driverError.code === 'SQLITE_CONSTRAINT' &&
         typeof driverError.message === 'string' &&
         driverError.message.includes('UNIQUE constraint failed: users.email')
@@ -250,6 +262,7 @@ function toUser(entity: UserEntity): User {
         username: entity.username,
         email: entity.email,
         password: entity.password,
+        tokenVersion: entity.tokenVersion,
     };
 }
 
@@ -270,6 +283,12 @@ function toTask(entity: TaskEntity): Task {
     }
     if (entity.ownerId !== null) {
         task.ownerId = entity.ownerId;
+    }
+    if (entity.workspaceId !== null) {
+        task.workspaceId = entity.workspaceId;
+    }
+    if (entity.assigneeId !== null) {
+        task.assigneeId = entity.assigneeId;
     }
     if (entity.dueDate !== null) {
         task.dueDate = entity.dueDate;
@@ -301,6 +320,10 @@ export class DatabaseService implements OnModuleInit {
     ) {}
 
     async onModuleInit(): Promise<void> {
+        if (this.dataSource.options.type !== 'sqlite') {
+            return;
+        }
+
         const legacyPath = getLegacyDatabasePath();
 
         if (legacyPath) {
@@ -308,9 +331,12 @@ export class DatabaseService implements OnModuleInit {
         }
     }
 
-    async findAll(ownerId: number): Promise<Task[]> {
+    async findAll(ownerId: number, workspaceId?: number): Promise<Task[]> {
         const tasks = await this.tasks.find({
-            where: { ownerId },
+            where:
+                workspaceId === undefined
+                    ? { ownerId, workspaceId: IsNull() }
+                    : { workspaceId },
             relations: { subtasks: true },
             order: { id: 'ASC' },
         });
@@ -320,6 +346,14 @@ export class DatabaseService implements OnModuleInit {
     async findOne(id: number, ownerId: number): Promise<Task | undefined> {
         const task = await this.tasks.findOne({
             where: { id, ownerId },
+            relations: { subtasks: true },
+        });
+        return task ? toTask(task) : undefined;
+    }
+
+    async findOneById(id: number): Promise<Task | undefined> {
+        const task = await this.tasks.findOne({
+            where: { id },
             relations: { subtasks: true },
         });
         return task ? toTask(task) : undefined;
@@ -353,7 +387,7 @@ export class DatabaseService implements OnModuleInit {
     }
 
     async create(
-        task: Omit<Task, 'id' | 'ownerId' | 'subtasks' | 'recurrenceSeriesId'> & {
+        task: Omit<Task, 'id' | 'subtasks' | 'recurrenceSeriesId'> & {
             ownerId: number;
         },
     ): Promise<Task> {
@@ -364,6 +398,8 @@ export class DatabaseService implements OnModuleInit {
                 description: task.description ?? null,
                 completed: task.completed,
                 ownerId: task.ownerId,
+                workspaceId: task.workspaceId ?? null,
+                assigneeId: task.assigneeId ?? null,
                 dueDate: task.dueDate ?? null,
                 priority: task.priority ?? 'medium',
                 project: task.project ?? null,
@@ -390,7 +426,7 @@ export class DatabaseService implements OnModuleInit {
         return this.dataSource.transaction(async (manager) => {
             const repository = manager.getRepository(TaskEntity);
             const task = await repository.findOne({
-                where: { id, ownerId },
+                where: { id },
                 relations: { subtasks: true },
             });
             if (!task) {
@@ -413,6 +449,9 @@ export class DatabaseService implements OnModuleInit {
             if (changes.labels !== undefined) task.labels = changes.labels;
             if ('recurrence' in changes) {
                 task.recurrence = changes.recurrence ?? null;
+            }
+            if ('assigneeId' in changes) {
+                task.assigneeId = changes.assigneeId ?? null;
             }
             if (task.recurrence && task.recurrenceSeriesId === null) {
                 task.recurrenceSeriesId = task.id;
@@ -440,6 +479,8 @@ export class DatabaseService implements OnModuleInit {
                             description: task.description,
                             completed: false,
                             ownerId: task.ownerId,
+                            workspaceId: task.workspaceId,
+                            assigneeId: task.assigneeId,
                             dueDate,
                             priority: task.priority,
                             project: task.project,
@@ -462,7 +503,7 @@ export class DatabaseService implements OnModuleInit {
     ): Promise<Task | undefined> {
         return this.dataSource.transaction(async (manager) => {
             const task = await manager.getRepository(TaskEntity).findOne({
-                where: { id: taskId, ownerId },
+                where: { id: taskId },
                 relations: { subtasks: true },
             });
             if (!task) {
@@ -488,7 +529,7 @@ export class DatabaseService implements OnModuleInit {
     ): Promise<Task | undefined> {
         return this.dataSource.transaction(async (manager) => {
             const task = await manager.getRepository(TaskEntity).findOne({
-                where: { id: taskId, ownerId },
+                where: { id: taskId },
                 relations: { subtasks: true },
             });
             const subtask = task?.subtasks.find((item) => item.id === subtaskId);
@@ -509,7 +550,7 @@ export class DatabaseService implements OnModuleInit {
     ): Promise<Task | undefined> {
         return this.dataSource.transaction(async (manager) => {
             const task = await manager.getRepository(TaskEntity).findOne({
-                where: { id: taskId, ownerId },
+                where: { id: taskId },
                 relations: { subtasks: true },
             });
             const subtask = task?.subtasks.find((item) => item.id === subtaskId);
@@ -523,11 +564,11 @@ export class DatabaseService implements OnModuleInit {
         });
     }
 
-    async remove(id: number, ownerId: number): Promise<Task | undefined> {
+    async remove(id: number, _ownerId: number): Promise<Task | undefined> {
         return this.dataSource.transaction(async (manager) => {
             const repository = manager.getRepository(TaskEntity);
             const task = await repository.findOne({
-                where: { id, ownerId },
+                where: { id },
                 relations: { subtasks: true },
             });
             if (!task) {

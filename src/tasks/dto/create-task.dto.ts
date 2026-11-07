@@ -6,6 +6,8 @@ import {
     IsIn,
     IsNotEmpty,
     IsString,
+    IsInt,
+    IsPositive,
     Matches,
     MaxLength,
     ValidateIf,
@@ -52,4 +54,14 @@ export class CreateTaskDto {
     @IsIn(['daily', 'weekly', 'monthly'])
     @ValidateIf((_object, value) => value !== undefined)
     recurrence?: TaskRecurrence;
+
+    @IsInt()
+    @IsPositive()
+    @ValidateIf((_object, value) => value !== undefined)
+    workspaceId?: number;
+
+    @IsInt()
+    @IsPositive()
+    @ValidateIf((_object, value) => value !== undefined)
+    assigneeId?: number;
 }

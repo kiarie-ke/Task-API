@@ -1,190 +1,107 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Taskflow
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Taskflow is a NestJS task-management API with a Next.js web app. It supports
+personal tasks and shared workspaces, task comments and activity, saved views,
+scheduled reminders, offline task changes, and SQLite or PostgreSQL storage.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Run locally
 
-## Description
-
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
+Install the API and frontend dependencies, then run each application in a
+separate terminal:
 
 ```bash
-$ npm install
+npm install
+npm run start:dev
 ```
-
-## Compile and run the project
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+cd frontend
+npm install
+cp .env.local.example .env.local
+npm run dev
 ```
 
-## Run tests
+Open [http://localhost:3001](http://localhost:3001). The API listens on port
+3000 by default. Set `FRONTEND_ORIGIN` on the API if the frontend uses a
+different origin.
 
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
-```
+Set a strong `JWT_SECRET` before starting the API. In development, password
+reset and workspace invitation emails are written to `data/mail/`. Set
+`FRONTEND_URL` if links in those emails should point to a different frontend.
 
 ## Authentication
 
-Set a strong `JWT_SECRET` environment variable before starting the API. Register
-with `POST /auth/register` and log in with `POST /auth/login`; both accept a
-JSON body containing `email` and `password`, and registration also requires a
-`username`. Successful requests return an `accessToken` and a user profile.
-Include the token as `Authorization: Bearer <accessToken>` when calling any
-`/tasks` endpoint. Tasks are private to the account that created them. Tasks
-saved before authentication was added remain unowned and inaccessible.
+Register with `POST /auth/register` using `username`, `email`, and `password`;
+sign in with `POST /auth/login` using `email` and `password`. Both return an
+access token. Send it as a bearer token in the `Authorization` header when
+calling protected endpoints. Refresh tokens are rotated in an HttpOnly cookie;
+`POST /auth/refresh` renews the session and `POST /auth/logout` revokes it.
 
-## Frontend
+Password reset uses `POST /auth/password-reset/request` and
+`POST /auth/password-reset/confirm`. Reset links are one-time use and expire
+after 30 minutes. Password reset revokes refresh sessions and invalidates
+existing access tokens.
 
-The Next.js task dashboard lives in [frontend/](./frontend/README.md). Run the
-API and frontend in separate terminals; the frontend runs at
-`http://localhost:3001` and connects to the API at `http://localhost:3000` by
-default.
+## Task features
 
-## Database
+Tasks support descriptions, due dates, priorities, projects, labels, recurring
+tasks, and subtasks. Users can filter and sort tasks, create saved filter views,
+and view a weekly planner. Completing a recurring task creates its next
+occurrence.
 
-The API stores users, tasks, and subtasks in SQLite at
-`data/taskflow.sqlite` by default. On its first start, it imports the existing
-`data/tasks.json` file if present; the JSON file is kept unchanged as a backup.
-The import preserves existing IDs, account ownership, and passwords. To use a
-different SQLite file, set `TASK_DATABASE_PATH`. To import from a different
-legacy JSON file, also set `TASK_LEGACY_DATABASE_PATH`.
+Workspaces support membership, invitations, roles, task sharing, and
+assignment. Workspace members can collaborate through task comments and an
+activity history. Access is scoped by task ownership and workspace membership.
 
-The SQLite schema is managed by TypeORM migrations, which run automatically at
-startup.
+Reminders can be configured by timezone, local reminder time, and delivery
+channel. Email reminders require SMTP in production. Web push requires VAPID
+keys and a browser that supports push notifications. The app also supports
+installability and an offline task cache with queued task/subtask changes; the
+queue syncs when connectivity returns.
 
-## Task management
+## Configuration
 
-Tasks support descriptions, due dates, low/medium/high priorities, free-text
-projects, and up to 10 labels. Recurring tasks can repeat daily, weekly, or
-monthly; a due date is required, and completing a recurring task creates its
-next occurrence. Tasks can also contain subtasks, which have their own
-completion state.
-
-The dashboard supports editing, status and due-date filters, priority/project/
-label filters, and sorting by creation time, due date, priority, or title.
-Due-today and overdue tasks are highlighted in the app; reminders are
-in-app only (there are no push or email notifications).
-
-The authenticated API accepts these optional task fields in `POST /tasks` and
-`PATCH /tasks/:id`:
-
-| Field | Values |
+| Variable | Purpose |
 | --- | --- |
-| `dueDate` | Date in `YYYY-MM-DD` format |
-| `priority` | `low`, `medium`, or `high` |
-| `project` | Free-text project name |
-| `labels` | Array of up to 10 strings |
-| `recurrence` | `daily`, `weekly`, or `monthly` |
+| `JWT_SECRET` | Required signing secret for access tokens |
+| `FRONTEND_ORIGIN` | Allowed browser origin; defaults to `http://localhost:3001` |
+| `FRONTEND_URL` | Base URL used in password reset and invitation links |
+| `MAIL_FROM` | Sender address for email |
+| `SMTP_URL` | SMTP connection URL; required when `NODE_ENV=production` |
+| `VAPID_PUBLIC_KEY` | Optional Web Push public key |
+| `VAPID_PRIVATE_KEY` | Optional Web Push private key; configure with the public key |
+| `VAPID_SUBJECT` | Optional Web Push contact, such as a `mailto:` URL |
+| `TASK_DATABASE_PATH` | SQLite file path; defaults to `data/taskflow.sqlite` |
+| `TASK_LEGACY_DATABASE_PATH` | Optional legacy JSON source to import into SQLite |
+| `DATABASE_URL` | PostgreSQL connection URL; cannot be combined with SQLite path variables |
+| `TASK_BACKUP_DIR` | Backup directory; defaults to `backups/` |
 
-Subtasks are managed through `POST /tasks/:id/subtasks`,
-`PATCH /tasks/:id/subtasks/:subtaskId`, and
-`DELETE /tasks/:id/subtasks/:subtaskId`. All task and subtask operations are
-scoped to the authenticated owner.
+The TypeORM migrations run automatically at startup. Legacy JSON import is
+SQLite-only. For PostgreSQL, provide a reachable database in `DATABASE_URL`.
+Production email needs a reachable SMTP server and a valid `SMTP_URL`.
 
-## Deployment
+## Backup and restore
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project, run this and approve the code it prints at [observe.nestjs.com/link](https://observe.nestjs.com/link) - signing up for free if you have no account:
+Create a local database backup with:
 
 ```bash
-$ npx @nestjs/observe link
+npm run db:backup
 ```
 
-It installs `@nestjs/observe`, wires it into `AppModule` and `main.ts`, and writes the app key and secret into `.env`, which every `nest start` script (`start`, `start:dev`, `start:debug`) then loads. In production, set `OBSERVE_APP_KEY` and `OBSERVE_APP_SECRET` in the environment instead.
+SQLite backups use the SQLite online backup API. PostgreSQL backups use
+`pg_dump` in custom format, so `pg_dump` must be installed and available on
+`PATH`. Set `TASK_BACKUP_DIR` to change the destination.
 
-Or do it by hand:
+Restore a SQLite backup by stopping the API and replacing the configured
+SQLite database file with the backup. Restore a PostgreSQL backup with
+`pg_restore` against the target database. Keep backups encrypted and outside
+version control.
+
+## Validation
 
 ```bash
-$ npm install @nestjs/observe
+npm run build
+npm run lint
+npm run test:e2e
+cd frontend && npm run lint && npm run build
 ```
-
-Then follow the [setup guide](https://docs.nestjs.com/observability/sdk) - it takes a single import and an app key.
-
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).

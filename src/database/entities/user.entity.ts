@@ -14,4 +14,20 @@ export class UserEntity {
 
     @Column({ type: 'text' })
     password: string;
+
+    @Column({ type: 'integer', name: 'token_version', default: 0 })
+    tokenVersion: number;
+
+    @Column({ type: 'text', default: 'UTC' })
+    timezone: string;
+
+    @Column({ type: 'text', name: 'reminder_time', default: '09:00' })
+    reminderTime: string;
+
+    @Column({
+        type: 'simple-json',
+        name: 'reminder_channels',
+        default: '["email"]',
+    })
+    reminderChannels: string[];
 }

@@ -51,6 +51,7 @@ lerna-debug.log*
 
 # Runtime data
 /data/
+/backups/
 pids
 *.pid
 *.seed

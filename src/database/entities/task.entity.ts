@@ -26,6 +26,12 @@ export class TaskEntity {
     @Column({ type: 'integer', name: 'owner_id', nullable: true })
     ownerId: number | null;
 
+    @Column({ type: 'integer', name: 'workspace_id', nullable: true })
+    workspaceId: number | null;
+
+    @Column({ type: 'integer', name: 'assignee_id', nullable: true })
+    assigneeId: number | null;
+
     @Column({ type: 'text', name: 'due_date', nullable: true })
     dueDate: string | null;
 

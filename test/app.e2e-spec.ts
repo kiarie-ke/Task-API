@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { InMemoryMailTransport, MailTransport } from '@nestjs/mail';
+import { DataSource } from 'typeorm';
 import { AppModule } from './../src/app.module';
+import { RepairFeatureColumns1794000000002 } from '../src/database/migrations/1794000000002-RepairFeatureColumns';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -15,6 +18,7 @@ describe('AppController (e2e)', () => {
   const originalLegacyDatabasePath = process.env.TASK_LEGACY_DATABASE_PATH;
   const originalJwtSecret = process.env.JWT_SECRET;
   let accessToken: string;
+  let mailbox: InMemoryMailTransport;
 
   beforeEach(async () => {
     databaseDirectory = await mkdtemp(join(tmpdir(), 'task-api-e2e-'));
@@ -29,6 +33,8 @@ describe('AppController (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
+    mailbox = app.get(MailTransport) as InMemoryMailTransport;
+    mailbox.clear();
     const registration = await request(app.getHttpServer())
       .post('/auth/register')
       .send({
@@ -38,7 +44,7 @@ describe('AppController (e2e)', () => {
       })
       .expect(201);
     accessToken = registration.body.accessToken;
-  });
+  }, 30_000);
 
   it('/ (GET)', () => {
     return request(app.getHttpServer())
@@ -473,6 +479,26 @@ describe('AppController (e2e)', () => {
       .expect(404);
   });
 
+  it('repairs feature columns missing from an already-migrated SQLite database', async () => {
+    const queryRunner = app.get(DataSource).createQueryRunner();
+    await queryRunner.connect();
+    try {
+      await queryRunner.query(
+        'ALTER TABLE "users" DROP COLUMN "token_version"',
+      );
+      await queryRunner.query(
+        'ALTER TABLE "tasks" DROP COLUMN "workspace_id"',
+      );
+
+      await new RepairFeatureColumns1794000000002().up(queryRunner);
+
+      expect(await queryRunner.hasColumn('users', 'token_version')).toBe(true);
+      expect(await queryRunner.hasColumn('tasks', 'workspace_id')).toBe(true);
+    } finally {
+      await queryRunner.release();
+    }
+  });
+
   it('registers, logs in, and rejects unauthenticated task access', async () => {
     const server = app.getHttpServer();
     await request(server)
@@ -501,6 +527,221 @@ describe('AppController (e2e)', () => {
       })
       .expect(409);
     await request(server).get('/tasks').expect(401);
+  });
+
+  it('rotates refresh cookies and revokes them on logout', async () => {
+    const server = app.getHttpServer();
+    const login = await request(server)
+      .post('/auth/login')
+      .send({ email: 'test@example.com', password: 'secure-password' })
+      .expect(200);
+    const cookie = login.headers['set-cookie'][0].split(';')[0];
+
+    const refreshed = await request(server)
+      .post('/auth/refresh')
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(refreshed.body.accessToken).toEqual(expect.any(String));
+    const rotatedCookie = refreshed.headers['set-cookie'][0].split(';')[0];
+
+    await request(server)
+      .post('/auth/refresh')
+      .set('Cookie', cookie)
+      .expect(401);
+    await request(server)
+      .post('/auth/logout')
+      .set('Cookie', rotatedCookie)
+      .expect(204);
+    await request(server)
+      .post('/auth/refresh')
+      .set('Cookie', rotatedCookie)
+      .expect(401);
+  });
+
+  it('sends one-time password reset links and revokes existing access tokens', async () => {
+    const server = app.getHttpServer();
+    await request(server)
+      .post('/auth/password-reset/request')
+      .send({ email: 'missing@example.com' })
+      .expect(200);
+    mailbox.assertNotSent();
+
+    await request(server)
+      .post('/auth/password-reset/request')
+      .send({ email: 'test@example.com' })
+      .expect(200);
+    const resetMail = mailbox.assertSent({ to: 'test@example.com' });
+    const token = resetMail.link('/reset-password').searchParams.get('token');
+    expect(token).toEqual(expect.any(String));
+
+    await request(server)
+      .post('/auth/password-reset/confirm')
+      .send({ token, password: 'a-new-secure-password' })
+      .expect(204);
+    await request(server)
+      .get('/tasks')
+      .auth(accessToken, { type: 'bearer' })
+      .expect(401);
+    await request(server)
+      .post('/auth/password-reset/confirm')
+      .send({ token, password: 'another-secure-password' })
+      .expect(401);
+    await request(server)
+      .post('/auth/login')
+      .send({ email: 'test@example.com', password: 'secure-password' })
+      .expect(401);
+    await request(server)
+      .post('/auth/login')
+      .send({ email: 'test@example.com', password: 'a-new-secure-password' })
+      .expect(200);
+  });
+
+  it('isolates workspace tasks and enforces membership roles', async () => {
+    const server = app.getHttpServer();
+    const workspace = await request(server)
+      .post('/workspaces')
+      .auth(accessToken, { type: 'bearer' })
+      .send({ name: 'Design team' })
+      .expect(201);
+    const task = await request(server)
+      .post('/tasks')
+      .auth(accessToken, { type: 'bearer' })
+      .send({ title: 'Review the prototype', workspaceId: workspace.body.id })
+      .expect(201);
+
+    const member = await request(server)
+      .post('/auth/register')
+      .send({
+        username: 'team-member',
+        email: 'member@example.com',
+        password: 'secure-password',
+      })
+      .expect(201);
+    await request(server)
+      .get(`/tasks?workspaceId=${workspace.body.id}`)
+      .auth(member.body.accessToken, { type: 'bearer' })
+      .expect(404);
+
+    await request(server)
+      .post(`/workspaces/${workspace.body.id}/invitations`)
+      .auth(accessToken, { type: 'bearer' })
+      .send({ email: 'member@example.com', role: 'member' })
+      .expect(201);
+    const inviteToken = mailbox
+      .assertSent({ to: 'member@example.com' })
+      .link('/accept-invitation')
+      .searchParams.get('token');
+    expect(inviteToken).toEqual(expect.any(String));
+    await request(server)
+      .post('/workspaces/accept-invitation')
+      .auth(member.body.accessToken, { type: 'bearer' })
+      .send({ token: inviteToken })
+      .expect(201);
+
+    await request(server)
+      .get(`/tasks?workspaceId=${workspace.body.id}`)
+      .auth(member.body.accessToken, { type: 'bearer' })
+      .expect(200)
+      .expect([task.body]);
+    await request(server)
+      .patch(`/tasks/${task.body.id}`)
+      .auth(member.body.accessToken, { type: 'bearer' })
+      .send({ completed: true })
+      .expect(403);
+    await request(server)
+      .patch(`/workspaces/${workspace.body.id}/members/1`)
+      .auth(member.body.accessToken, { type: 'bearer' })
+      .send({ role: 'admin' })
+      .expect(403);
+  });
+
+  it('scopes task comments, activity, saved views, and reminder preferences', async () => {
+    const server = app.getHttpServer();
+    const task = await request(server)
+      .post('/tasks')
+      .auth(accessToken, { type: 'bearer' })
+      .send({ title: 'Plan release' })
+      .expect(201);
+    await request(server)
+      .post(`/tasks/${task.body.id}/comments`)
+      .auth(accessToken, { type: 'bearer' })
+      .send({ content: 'Keep the release checklist current.' })
+      .expect(201);
+    await request(server)
+      .get(`/tasks/${task.body.id}/comments`)
+      .auth(accessToken, { type: 'bearer' })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toHaveLength(1);
+        expect(body[0]).toMatchObject({
+          content: 'Keep the release checklist current.',
+          username: 'test-user',
+        });
+      });
+    await request(server)
+      .get(`/tasks/${task.body.id}/activity`)
+      .auth(accessToken, { type: 'bearer' })
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body.map((item: { action: string }) => item.action)).toEqual([
+          'comment.created',
+          'task.created',
+        ]),
+      );
+
+    const savedView = await request(server)
+      .post('/saved-views')
+      .auth(accessToken, { type: 'bearer' })
+      .send({
+        name: 'High priority',
+        filters: { filter: 'active', priorityFilter: 'high' },
+      })
+      .expect(201);
+    await request(server)
+      .get('/saved-views')
+      .auth(accessToken, { type: 'bearer' })
+      .expect([savedView.body]);
+    await request(server)
+      .patch('/notifications/settings')
+      .auth(accessToken, { type: 'bearer' })
+      .send({
+        timezone: 'America/New_York',
+        reminderTime: '08:30',
+        channels: ['email'],
+      })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({
+          timezone: 'America/New_York',
+          reminderTime: '08:30',
+          channels: ['email'],
+        });
+      });
+    await request(server)
+      .post('/notifications/push-subscriptions')
+      .auth(accessToken, { type: 'bearer' })
+      .send({
+        endpoint: 'https://127.0.0.1/internal',
+        keys: { p256dh: 'public-key', auth: 'auth-key' },
+      })
+      .expect(400);
+
+    const otherUser = await request(server)
+      .post('/auth/register')
+      .send({
+        username: 'other-user',
+        email: 'other@example.com',
+        password: 'secure-password',
+      })
+      .expect(201);
+    await request(server)
+      .get('/saved-views')
+      .auth(otherUser.body.accessToken, { type: 'bearer' })
+      .expect([]);
+    await request(server)
+      .delete(`/saved-views/${savedView.body.id}`)
+      .auth(accessToken, { type: 'bearer' })
+      .expect(200);
   });
 
   afterEach(async () => {

@@ -5,6 +5,7 @@ import { DatabaseService } from '../database/database.service';
 
 interface JwtPayload {
     sub: number;
+    ver: number;
 }
 
 @Injectable()
@@ -29,6 +30,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
         const user = await this.databaseService.findUser(payload.sub);
         if (!user) {
+            throw new UnauthorizedException();
+        }
+        if (
+            !Number.isSafeInteger(payload.ver) ||
+            payload.ver !== (user.tokenVersion ?? 0)
+        ) {
             throw new UnauthorizedException();
         }
 
