@@ -2,6 +2,12 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+export interface User {
+    id: number;
+    username: string;
+    email: string;
+    password: string;
+}
 export interface Task {
     id: number;
     title: string;
@@ -11,7 +17,10 @@ export interface Task {
 
 interface DatabaseShape {
     tasks: Task[];
+    users: User[];
     nextId: number;
+    nextUserId: number;
+
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -31,6 +40,21 @@ function isTask(value: unknown): value is Task {
         (value.description === undefined ||
             typeof value.description === 'string') &&
         typeof value.completed === 'boolean'
+    );
+}
+
+function isUser(value: unknown): value is User {
+    if (!isRecord(value)) {
+        return false;
+    }
+
+    return (
+        typeof value.id === 'number' &&
+        Number.isSafeInteger(value.id) &&
+        value.id > 0 &&
+        typeof value.username === 'string' &&
+        typeof value.email === 'string' &&
+        typeof value.password === 'string'
     );
 }
 
@@ -57,7 +81,24 @@ function isDatabaseShape(value: unknown): value is DatabaseShape {
 
     const ids = new Set(tasks.map((task) => task.id));
     const highestId = Math.max(0, ...ids);
-    return ids.size === tasks.length && value.nextId > highestId;
+    if (ids.size !== tasks.length || value.nextId <= highestId) {
+        return false;
+    }
+
+    const users = value.users ?? [];
+    if (!Array.isArray(users) || !users.every(isUser)) {
+        return false;
+    }
+
+    const userIds = new Set(users.map((user) => user.id));
+    const highestUserId = Math.max(0, ...userIds);
+    const nextUserId = value.nextUserId ?? highestUserId + 1;
+    return (
+        userIds.size === users.length &&
+        typeof nextUserId === 'number' &&
+        Number.isSafeInteger(nextUserId) &&
+        nextUserId > highestUserId
+    );
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {
@@ -74,7 +115,7 @@ export class DatabaseService implements OnModuleInit {
     private readonly filePath =
         process.env.TASK_DATABASE_PATH ??
         join(process.cwd(), 'data', 'tasks.json');
-    private database: DatabaseShape = { tasks: [], nextId: 1 };
+    private database: DatabaseShape = { tasks: [], users: [], nextId: 1, nextUserId: 1 };
     private operationQueue: Promise<void> = Promise.resolve();
 
     async onModuleInit(): Promise<void> {
@@ -106,7 +147,14 @@ export class DatabaseService implements OnModuleInit {
             throw new Error(`Invalid task database at ${this.filePath}`);
         }
 
-        this.database = parsed;
+        this.database = {
+            tasks: parsed.tasks,
+            users: parsed.users ?? [],
+            nextId: parsed.nextId,
+            nextUserId:
+                parsed.nextUserId ??
+                Math.max(0, ...((parsed.users ?? []).map((user) => user.id))) + 1,
+        };
     }
 
     findAll(): Promise<Task[]> {
@@ -122,6 +170,51 @@ export class DatabaseService implements OnModuleInit {
         });
     }
 
+    createUser(user: Omit<User, 'id'>): Promise<User | undefined> {
+        return this.enqueue(async () => {
+            if (
+                this.database.users.some(
+                    (existing) =>
+                        existing.email.toLowerCase() ===
+                        user.email.toLowerCase(),
+                )
+            ) {
+                return undefined;
+            }
+
+            const createdUser: User = {
+                id: this.database.nextUserId,
+                ...user,
+            };
+            const nextDatabase: DatabaseShape = {
+                tasks: [...this.database.tasks],
+                users: [...this.database.users, createdUser],
+                nextId: this.database.nextId,
+                nextUserId: this.database.nextUserId + 1,
+            };
+
+            await this.persist(nextDatabase);
+            this.database = nextDatabase;
+            return { ...createdUser };
+        });
+    }
+
+    findUser(id: number): Promise<User | undefined> {
+        return this.enqueue(() => {
+            const user = this.database.users.find((item) => item.id === id);
+            return Promise.resolve(user ? { ...user } : undefined);
+        });
+    }
+
+    findUserByEmail(email: string): Promise<User | undefined> {
+        return this.enqueue(() => {
+            const user = this.database.users.find(
+                (item) => item.email.toLowerCase() === email.toLowerCase(),
+            );
+            return Promise.resolve(user ? { ...user } : undefined);
+        });
+    }
+
     create(task: Omit<Task, 'id'>): Promise<Task> {
         return this.enqueue(async () => {
             const createdTask: Task = {
@@ -130,7 +223,9 @@ export class DatabaseService implements OnModuleInit {
             };
             const nextDatabase: DatabaseShape = {
                 tasks: [...this.database.tasks, createdTask],
+                users: [...this.database.users],
                 nextId: this.database.nextId + 1,
+                nextUserId: this.database.nextUserId,
             };
 
             await this.persist(nextDatabase);

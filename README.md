@@ -57,6 +57,15 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Authentication
+
+Set a strong `JWT_SECRET` environment variable before starting the API. Register
+with `POST /auth/register` and log in with `POST /auth/login`; both accept a
+JSON body containing `email` and `password`, and registration also requires a
+`username`. Successful requests return an `accessToken` and a user profile.
+Include the token as `Authorization: Bearer <accessToken>` when calling any
+`/tasks` endpoint.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

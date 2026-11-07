@@ -11,10 +11,13 @@ describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
   let databaseDirectory: string;
   const originalDatabasePath = process.env.TASK_DATABASE_PATH;
+  const originalJwtSecret = process.env.JWT_SECRET;
+  let accessToken: string;
 
   beforeEach(async () => {
     databaseDirectory = await mkdtemp(join(tmpdir(), 'task-api-e2e-'));
     process.env.TASK_DATABASE_PATH = join(databaseDirectory, 'tasks.json');
+    process.env.JWT_SECRET = 'test-secret-with-sufficient-length';
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -23,6 +26,15 @@ describe('AppController (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
+    const registration = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        username: 'test-user',
+        email: 'test@example.com',
+        password: 'secure-password',
+      })
+      .expect(201);
+    accessToken = registration.body.accessToken;
   });
 
   it('/ (GET)', () => {
@@ -36,6 +48,7 @@ describe('AppController (e2e)', () => {
     const server = app.getHttpServer();
     const created = await request(server)
       .post('/tasks')
+      .set('Authorization', `Bearer ${accessToken}`)
       .send({ title: 'Test task', description: 'Task details' })
       .expect(201);
 
@@ -48,12 +61,14 @@ describe('AppController (e2e)', () => {
 
     await request(server)
       .patch('/tasks/1')
+      .set('Authorization', `Bearer ${accessToken}`)
       .send({ completed: true })
       .expect(200)
       .expect({ ...created.body, completed: true });
 
     await request(server)
       .delete('/tasks/1')
+      .set('Authorization', `Bearer ${accessToken}`)
       .expect(200)
       .expect({ ...created.body, completed: true });
   });
@@ -62,22 +77,31 @@ describe('AppController (e2e)', () => {
     const server = app.getHttpServer();
     await request(server)
       .post('/tasks')
+      .set('Authorization', `Bearer ${accessToken}`)
       .send({ title: 'First task' })
       .expect(201);
-    await request(server).delete('/tasks/1').expect(200);
+    await request(server)
+      .delete('/tasks/1')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
     await request(server)
       .post('/tasks')
+      .set('Authorization', `Bearer ${accessToken}`)
       .send({ title: 'Second task' })
       .expect(201)
       .expect(({ body }) => expect(body.id).toBe(2));
 
-    await request(server).get('/tasks/1').expect(404);
+    await request(server)
+      .get('/tasks/1')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(404);
   });
 
   it('persists tasks across application restarts', async () => {
     const server = app.getHttpServer();
     await request(server)
       .post('/tasks')
+      .set('Authorization', `Bearer ${accessToken}`)
       .send({ title: 'Persistent task' })
       .expect(201);
     await app.close();
@@ -91,15 +115,56 @@ describe('AppController (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/tasks')
+      .set('Authorization', `Bearer ${accessToken}`)
       .expect(200)
       .expect([{ id: 1, title: 'Persistent task', completed: false }]);
   });
 
   it('validates task input and task IDs', async () => {
     const server = app.getHttpServer();
-    await request(server).post('/tasks').send({ title: 42 }).expect(400);
-    await request(server).get('/tasks/not-a-number').expect(400);
-    await request(server).get('/tasks/1').expect(404);
+    await request(server)
+      .post('/tasks')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ title: 42 })
+      .expect(400);
+    await request(server)
+      .get('/tasks/not-a-number')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(400);
+    await request(server)
+      .get('/tasks/1')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(404);
+  });
+
+  it('registers, logs in, and rejects unauthenticated task access', async () => {
+    const server = app.getHttpServer();
+    await request(server)
+      .post('/auth/login')
+      .send({ email: 'test@example.com', password: 'secure-password' })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.accessToken).toEqual(expect.any(String));
+        expect(body.user).toEqual({
+          id: 1,
+          username: 'test-user',
+          email: 'test@example.com',
+        });
+      });
+
+    await request(server)
+      .post('/auth/login')
+      .send({ email: 'test@example.com', password: 'wrong-password' })
+      .expect(401);
+    await request(server)
+      .post('/auth/register')
+      .send({
+        username: 'another-user',
+        email: 'TEST@example.com',
+        password: 'secure-password',
+      })
+      .expect(409);
+    await request(server).get('/tasks').expect(401);
   });
 
   afterEach(async () => {
@@ -108,6 +173,11 @@ describe('AppController (e2e)', () => {
       delete process.env.TASK_DATABASE_PATH;
     } else {
       process.env.TASK_DATABASE_PATH = originalDatabasePath;
+    }
+    if (originalJwtSecret === undefined) {
+      delete process.env.JWT_SECRET;
+    } else {
+      process.env.JWT_SECRET = originalJwtSecret;
     }
     await rm(databaseDirectory, { recursive: true, force: true });
   });
