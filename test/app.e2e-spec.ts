@@ -1,13 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
+  let databaseDirectory: string;
+  const originalDatabasePath = process.env.TASK_DATABASE_PATH;
 
   beforeEach(async () => {
+    databaseDirectory = await mkdtemp(join(tmpdir(), 'task-api-e2e-'));
+    process.env.TASK_DATABASE_PATH = join(databaseDirectory, 'tasks.json');
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -35,6 +43,7 @@ describe('AppController (e2e)', () => {
       id: 1,
       title: 'Test task',
       description: 'Task details',
+      completed: false,
     });
 
     await request(server)
@@ -65,6 +74,27 @@ describe('AppController (e2e)', () => {
     await request(server).get('/tasks/1').expect(404);
   });
 
+  it('persists tasks across application restarts', async () => {
+    const server = app.getHttpServer();
+    await request(server)
+      .post('/tasks')
+      .send({ title: 'Persistent task' })
+      .expect(201);
+    await app.close();
+
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
+    await app.init();
+
+    await request(app.getHttpServer())
+      .get('/tasks')
+      .expect(200)
+      .expect([{ id: 1, title: 'Persistent task', completed: false }]);
+  });
+
   it('validates task input and task IDs', async () => {
     const server = app.getHttpServer();
     await request(server).post('/tasks').send({ title: 42 }).expect(400);
@@ -74,5 +104,11 @@ describe('AppController (e2e)', () => {
 
   afterEach(async () => {
     await app.close();
+    if (originalDatabasePath === undefined) {
+      delete process.env.TASK_DATABASE_PATH;
+    } else {
+      process.env.TASK_DATABASE_PATH = originalDatabasePath;
+    }
+    await rm(databaseDirectory, { recursive: true, force: true });
   });
 });

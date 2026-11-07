@@ -1,44 +1,45 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { DatabaseService, Task } from '../database/database.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 
-export interface Task {
-    id: number;
-    title: string;
-    description?: string;
-    completed?: boolean;
-}
 @Injectable()
 export class TasksService {
-    private tasks: Task[] = [];
-    private nextTaskId = 1;
+    constructor(private readonly databaseService: DatabaseService) {}
 
-    create(dto: CreateTaskDto) {
-        const task: Task = Object.assign({ id: this.nextTaskId++ }, dto);
-        this.tasks.push(task);
-        return task;
+    create(dto: CreateTaskDto): Promise<Task> {
+        return this.databaseService.create({
+            title: dto.title,
+            description: dto.description,
+            completed: dto.completed ?? false,
+        });
     }
-    findAll() {
-        return this.tasks;
+
+    findAll(): Promise<Task[]> {
+        return this.databaseService.findAll();
     }
-    findOne(id: number) {
-        const task = this.tasks.find((task) => task.id === id);
+
+    async findOne(id: number): Promise<Task> {
+        const task = await this.databaseService.findOne(id);
         if (!task) {
             throw new NotFoundException(`Task with id ${id} not found`);
         }
         return task;
     }
-    update(id: number, dto: UpdateTaskDto) {
-        const task = this.findOne(id);
-        Object.assign(task, dto);
-        return task;
-    }
-    remove(id: number) {
-        const index = this.tasks.findIndex((task) => task.id === id);
-        if (index === -1) {
+
+    async update(id: number, dto: UpdateTaskDto): Promise<Task> {
+        const task = await this.databaseService.update(id, dto);
+        if (!task) {
             throw new NotFoundException(`Task with id ${id} not found`);
         }
-        const [removedTask] = this.tasks.splice(index, 1);
-        return removedTask;
+        return task;
+    }
+
+    async remove(id: number): Promise<Task> {
+        const task = await this.databaseService.remove(id);
+        if (!task) {
+            throw new NotFoundException(`Task with id ${id} not found`);
+        }
+        return task;
     }
 }
