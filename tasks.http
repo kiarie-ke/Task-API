@@ -1,0 +1,38 @@
+@baseUrl = http://localhost:3000
+
+### Health check
+GET {{baseUrl}}/
+
+### Greeting
+GET {{baseUrl}}/hello/Kenneth
+
+### Loud greeting
+GET {{baseUrl}}/hello/Kenneth?loud=true
+
+### Create a task
+# @name createTask
+POST {{baseUrl}}/tasks
+Content-Type: application/json
+
+{
+  "title": "Test task",
+  "description": "Created with REST Client"
+}
+
+### Get all tasks
+GET {{baseUrl}}/tasks
+
+### Get the task created above
+@taskId = {{createTask.response.body.$.id}}
+GET {{baseUrl}}/tasks/{{taskId}}
+
+### Update the task
+PATCH {{baseUrl}}/tasks/{{taskId}}
+Content-Type: application/json
+
+{
+  "completed": true
+}
+
+### Delete the task
+DELETE {{baseUrl}}/tasks/{{taskId}}
